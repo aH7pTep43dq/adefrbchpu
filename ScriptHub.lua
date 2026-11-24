@@ -48,8 +48,17 @@ local function notify(title, content, duration)
     end)
 end
 
--- pobiera i uruchamia skrypt
-local function runScript(entry)
+-- po uruchomieniu skryptu hub chowa się, żeby nie zasłaniał jego okna
+local autoHide = true
+
+local function hideHub()
+    task.delay(0.6, function()
+        pcall(function() window:Hide() end)
+    end)
+end
+
+-- pobiera i uruchamia skrypt (keepOpen = nie chowaj huba po udanym starcie)
+local function runScript(entry, keepOpen)
     if entry.url and entry.url:find("TWOJ_NICK", 1, true) then
         notify(entry.name, "Ustaw prawdziwy link w tabeli SCRIPTS.", 5)
         return false
@@ -64,6 +73,7 @@ local function runScript(entry)
 
     if ok then
         notify(entry.name, "Załadowano.")
+        if autoHide and not keepOpen then hideHub() end
     else
         warn("[Script Hub] " .. entry.name .. ": " .. tostring(err))
         notify(entry.name, "Błąd ładowania (szczegóły w konsoli F9).", 5)
@@ -78,14 +88,25 @@ local home = window:CreateTab({ name = "Home", icon = 0 })
 
 home:CreateDivider({ text = "Hub" })
 
+home:CreateToggle({
+    name = "Chowaj hub po uruchomieniu skryptu",
+    description = "Hub zwija się do przycisku, więc nie zasłania okna skryptu.",
+    value = true,
+    forgetState = true,
+    callback = function(v)
+        autoHide = v
+    end,
+})
+
 home:CreateButton({
     name = "Załaduj wszystkie skrypty",
     description = "Uruchamia po kolei każdy skrypt z listy.",
     callback = function()
         for _, entry in ipairs(SCRIPTS) do
-            runScript(entry)
+            runScript(entry, true)
             task.wait(0.2)
         end
+        if autoHide then hideHub() end
     end,
 })
 
