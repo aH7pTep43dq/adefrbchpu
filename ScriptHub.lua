@@ -23,13 +23,19 @@ local SCRIPTS = {
         name = "Visuals / World",
         description = "Fullbright, No Fog, FOV, Always Day, No Shadows.",
         url = "https://raw.githubusercontent.com/aH7pTep43dq/adefrbchpu/main/visuals_world.lua",
+        unload = function()
+            local inst = getgenv and getgenv().VisualsWorld_Instance
+            if inst and inst.Unload then inst.Unload() end
+        end,
     },
     {
-        name = "Example (inline)",
-        description = "Example of a script pasted directly into the hub.",
-        source = [[
-            print("Script from the hub works!")
-        ]],
+        name = "Aimbot",
+        description = "Smooth camera aimbot with FOV circle, visibility & team check.",
+        url = "https://raw.githubusercontent.com/aH7pTep43dq/adefrbchpu/main/Aimbot.lua",
+        unload = function()
+            local sc = getgenv and getgenv().ScoutCheat
+            if sc and sc.UnloadAimbot then sc.UnloadAimbot() end
+        end,
     },
 }
 
