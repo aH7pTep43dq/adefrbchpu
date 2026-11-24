@@ -6,7 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local camera = Workspace.CurrentCamera
 
--- zapamiętujemy oryginalne ustawienia
+-- remember the original settings
 local original = {
     Brightness = Lighting.Brightness,
     Ambient = Lighting.Ambient,
@@ -18,7 +18,7 @@ local original = {
     FieldOfView = camera.FieldOfView,
 }
 
--- pomocnik: pętla, która utrzymuje ustawienie (niektóre gry je nadpisują)
+-- helper: a loop that keeps the setting applied (some games overwrite it)
 local connections = {}
 
 local function bind(name, enabled, onTick, onRestore)
@@ -34,7 +34,10 @@ local function bind(name, enabled, onTick, onRestore)
     end
 end
 
--- unloader: rozłącza pętle, przywraca ustawienia, zamyka GUI
+-- GUI window (declared before unload() so that function can see it)
+local window
+
+-- unloader: disconnects loops, restores settings, closes the GUI
 local unloaded = false
 
 local function unload()
@@ -57,13 +60,12 @@ local function unload()
         camera.FieldOfView = original.FieldOfView
     end)
 
-    -- zamknięcie GUI (metoda z dokumentacji Gen2)
+    -- close the GUI (method from the Gen2 docs)
     pcall(function() window:Unload() end)
 end
 
--- okno GUI
-local window = Rayfield:CreateWindow({
-    name = "Moj Skrypt",
+window = Rayfield:CreateWindow({
+    name = "Visuals / World",
     subtitle = "Rayfield Gen2",
     sidebarLayout = true,
 })
