@@ -36,7 +36,9 @@ local UserInputService = gs("UserInputService")
 local Stats            = gs("Stats")
 local CoreGui          = gs("CoreGui")
 local Workspace        = gs("Workspace") or cref(workspace)
-local Camera           = Workspace and (Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera"))
+local function getCamera()
+    return Workspace and (Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")) or nil
+end
 local rawRaycast       = Workspace and Workspace.Raycast
 
 local LocalPlayer = Players and cref(Players.LocalPlayer) or nil
@@ -73,7 +75,7 @@ local Config = {
     ScanInterval = 1.0,
     DeepRigSearch = false,
 
-    UseNilScan           = true,
+    UseNilScan           = false,
     NilScanInterval      = 5.0,
     UseGetInstances      = false,
     GetInstancesInterval = 10.0,
@@ -247,7 +249,7 @@ local _teamsCacheTime = 0
 local TEAMS_CACHE_TTL = 2.0
 
 local function getCachedTeams()
-    local now = tick()
+    local now = os.clock()
     if _teamsCache == nil or (now - _teamsCacheTime) >= TEAMS_CACHE_TTL then
         local TeamsService = gs("Teams")
         _teamsCache     = TeamsService and TeamsService:GetTeams() or {}
@@ -449,7 +451,7 @@ end
 
 -- Description of player/character data for diagnostics (attributes, Value objects, leaderstats)
 local function describeTeamData(inst)
-    if not inst then return "(brak)" end
+    if not inst then return "(none)" end
     local parts = {}
     local okT, t = pcall(function() return inst.Team end)
     if okT then parts[#parts + 1] = "Team=" .. tostring(t and t.Name or "nil") end
@@ -476,7 +478,7 @@ local function describeTeamData(inst)
         parts = cut
         parts[#parts + 1] = "…"
     end
-    return #parts > 0 and table.concat(parts, ", ") or "(brak)"
+    return #parts > 0 and table.concat(parts, ", ") or "(none)"
 end
 
 -- Clears all team caches (called e.g. when I change team)
@@ -491,7 +493,7 @@ local function clearAllEnemyCache()
 end
 
 local function getMyTeamId()
-    local now = tick()
+    local now = os.clock()
     if now - _myTeamTime >= 1 then
         _myTeamTime = now
         _myTeamId = LocalPlayer and getTeamId(LocalPlayer, LocalPlayer.Character) or nil
@@ -502,7 +504,7 @@ end
 -- true when all players (min. 3) are on the same Roblox team,
 -- which usually means a game without real teams (FFA with a single default team)
 local function isSingleTeamServer()
-    local now = tick()
+    local now = os.clock()
     if now - _singleTeamTime >= 2 then
         _singleTeamTime = now
         local first, count, same = nil, 0, true
@@ -606,7 +608,7 @@ local function isEnemy(character, player)
     if Config.UseEnemyCache then
         local cached = _enemyCache[character]
         if cached then
-            if (tick() - cached.time) < Config.EnemyCacheTTL then
+            if (os.clock() - cached.time) < Config.EnemyCacheTTL then
                 return cached.result
             else
                 _enemyCache[character] = nil
@@ -655,7 +657,7 @@ local function isEnemy(character, player)
         if not _enemyCacheConns[character] then
             setupEnemyCacheInvalidation(player, character)
         end
-        _enemyCache[character] = { result = result, time = tick() }
+        _enemyCache[character] = { result = result, time = os.clock() }
     end
 
     return result
@@ -668,7 +670,7 @@ local function isAlly(character, player)
     if not character then return false end
     local cached = _allyCache[character]
     local ttl = math.max(Config.EnemyCacheTTL, 0.5)
-    if cached and (tick() - cached.time) < ttl then return cached.result end
+    if cached and (os.clock() - cached.time) < ttl then return cached.result end
 
     local result  = false
     local handled = false
@@ -689,7 +691,7 @@ local function isAlly(character, player)
         end
     end
 
-    _allyCache[character] = { result = result, time = tick() }
+    _allyCache[character] = { result = result, time = os.clock() }
     return result
 end
 
@@ -836,6 +838,8 @@ local function cleanupESP(character)
     _allyCache[character] = nil
     local data = State.TrackedCharacters[character]
     if data and data ~= false then
+        if data.DiedConn then pcall(function() data.DiedConn:Disconnect() end); data.DiedConn = nil end
+        if data.AncestryConn then pcall(function() data.AncestryConn:Disconnect() end); data.AncestryConn = nil end
         pcall(function()
             if data.Highlight then data.Highlight.Enabled = false; data.Highlight.Adornee = nil end
         end)
@@ -961,25 +965,24 @@ local function createVisualForCharacter(character, player)
         end)
     end
 
-    State.TrackedCharacters[character] = {
+    local data = {
         Visuals = visu, Player = player, Highlight = highlight, Billboard = billboard,
         NameLabel = nameLabel, DistanceLabel = distanceLabel,
         HealthBack = healthBack, HealthFill = healthFill, LastHpPct = -1,
         Box = box, BoxOutline = boxOutline, Tracer = tracer, HpBack = hpBack, HpFill = hpFill,
         ToolLabel = toolLabel, LastToolCheck = 0,
         RootPart = rootPart, Humanoid = humanoid, Head = head,
-        LastVisCheck = tick() - math.random() * 0.25, IsVisible = false,
+        LastVisCheck = os.clock() - math.random() * 0.25, IsVisible = false,
+        ShouldDraw = false, DrawColor = Config.VisibleColor,
     }
+    State.TrackedCharacters[character] = data
 
     if humanoid then
-        local diedConn
-        diedConn = humanoid.Died:Connect(function()
-            if diedConn then pcall(function() diedConn:Disconnect() end) end
+        data.DiedConn = humanoid.Died:Connect(function()
             cleanupESP(character)
         end)
-        table.insert(State.Connections, diedConn)
     end
-    character.AncestryChanged:Connect(function(_, parent)
+    data.AncestryConn = character.AncestryChanged:Connect(function(_, parent)
         if not parent then cleanupESP(character) end
     end)
 end
@@ -990,7 +993,6 @@ end
 local _configGui = nil
 local _guiRefreshAll = nil   -- set by the GUI
 local _guiToggle = nil       -- show/hide the window (set by the GUI)
-local _bindCapture = nil     -- key-binding capture mode from the GUI
 
 local function unload()
     if State.Unloaded then return end
@@ -1085,7 +1087,7 @@ local function updateDrawings(data, rootPart, color, humanoid)
     if not data.Box then return end  -- no Drawing API
 
     local wantBox, wantTr, wantHp = State.ESP.Box, State.ESP.Tracers, State.ESP.HealthBar
-    local cam = Camera
+    local cam = getCamera()
     if not (cam and rootPart and rootPart.Parent) or not (wantBox or wantTr or wantHp) then
         hideDrawings(data); return
     end
@@ -1094,7 +1096,9 @@ local function updateDrawings(data, rootPart, color, humanoid)
     local center, onScreen = cam:WorldToViewportPoint(rootPos)
     if not onScreen or center.Z <= 0 then hideDrawings(data); return end
 
-    local top    = cam:WorldToViewportPoint(rootPos + Vector3.new(0, 3, 0))
+    local head = data.Head
+    local topWorld = (head and head.Parent) and (head.Position + Vector3.new(0, 1, 0)) or (rootPos + Vector3.new(0, 3, 0))
+    local top    = cam:WorldToViewportPoint(topWorld)
     local bottom = cam:WorldToViewportPoint(rootPos - Vector3.new(0, 3.5, 0))
     local height = math.abs(bottom.Y - top.Y)
     local width  = height * 0.6
@@ -1142,6 +1146,7 @@ local function updateVisual(character, data, lpChar, lpRoot, excludeTable)
     if not (data.Highlight and data.Billboard) then return end
 
     local function hideAll()
+        data.ShouldDraw = false
         hideDrawings(data)
         if data.Highlight.Enabled then data.Highlight.Enabled = false end
         if data.Billboard.Enabled  then data.Billboard.Enabled  = false end
@@ -1188,11 +1193,11 @@ local function updateVisual(character, data, lpChar, lpRoot, excludeTable)
 
     local isVisible = data.IsVisible
     if Config.VisibilityCheck then
-        local now = tick()
+        local now = os.clock()
         if now - data.LastVisCheck >= 0.25 then
             data.LastVisCheck = now
             local safeExclude = excludeTable[1] and excludeTable or {}
-            data.IsVisible    = isTargetVisible(Camera, targetAdornee or rootPart, character, safeExclude)
+            data.IsVisible    = isTargetVisible(getCamera(), targetAdornee or rootPart, character, safeExclude)
             isVisible         = data.IsVisible
         end
     else
@@ -1220,8 +1225,9 @@ local function updateVisual(character, data, lpChar, lpRoot, excludeTable)
     if data.DistanceLabel.Text ~= distText then data.DistanceLabel.Text = distText end
 
     updateHealthBar(data, humanoid)
-    updateTool(data, character, tick())
-    updateDrawings(data, rootPart, currentColor, humanoid)
+    updateTool(data, character, os.clock())
+    data.ShouldDraw = true
+    data.DrawColor  = currentColor
 end
 
 -- ===========================
@@ -1257,10 +1263,10 @@ local function checkModelCandidate(model)
     if State.TrackedCharacters[model] then return end
 
     local checkedAt = _nonChar[model]
-    if checkedAt and (tick() - checkedAt) < NON_CHAR_TTL then return end
+    if checkedAt and (os.clock() - checkedAt) < NON_CHAR_TTL then return end
 
     local ok, humanoid = looksLikeCharacter(model)
-    if not ok then _nonChar[model] = tick(); return end
+    if not ok then _nonChar[model] = os.clock(); return end
     if humanoid.MaxHealth > 0 and humanoid.Health <= 0 then return end
 
     local player = Players:GetPlayerFromCharacter(model)
@@ -1344,7 +1350,7 @@ end
 -- ===========================
 -- Tier 1A: Nil Instance Scan
 -- ===========================
-local _nilObserved = {}
+local _nilObserved = setmetatable({}, { __mode = "k" })
 local _lastNilScan = 0
 
 local function scanNilInstances()
@@ -1373,10 +1379,14 @@ local function scanNilInstances()
             if not rootPart then continue end
 
             _nilObserved[inst] = true
-            inst.AncestryChanged:Connect(function(_, newParent)
-                if newParent and not State.TrackedCharacters[inst] then
+            local ancConn
+            ancConn = connect(inst.AncestryChanged, function(_, newParent)
+                if newParent then
+                    if ancConn then pcall(function() ancConn:Disconnect() end); ancConn = nil end
                     _nilObserved[inst] = nil
-                    task.defer(function() checkModelCandidate(inst) end)
+                    if not State.TrackedCharacters[inst] then
+                        task.defer(function() checkModelCandidate(inst) end)
+                    end
                 end
             end)
         end
@@ -1574,6 +1584,8 @@ local function scanAll()
             elseif child:IsA("Folder") or child:IsA("Configuration") or child:IsA("WorldModel") then
                 if nameMatchesContainerList(child.Name) then watchContainer(child) end
                 scan(child, depth + 1)
+            elseif Config.ScanTerrain and child:IsA("Terrain") then
+                scan(child, depth + 1)
             end
         end
     end
@@ -1759,7 +1771,7 @@ local function buildConfigGui()
         Config.UseEnemyCache = true; Config.EnemyCacheTTL = 1.5
         Config.ScanDepth = 4; Config.ScanInterval = 1.0
         Config.DeepRigSearch = false; Config.ScanTerrain = false
-        Config.UseNilScan = true; Config.UseGetInstances = false
+        Config.UseNilScan = false; Config.UseGetInstances = false
         Config.UseMetaHook = false; Config.UseScriptEnvScan = false
         Config.NilScanInterval = 5.0; Config.GetInstancesInterval = 10.0
         Config.ScriptEnvInterval = 15.0
@@ -1836,7 +1848,7 @@ local function buildConfigGui()
 
     local inKey = tTeam:CreateInput({
         name = "Custom key (attribute/Value)",
-        placeholder = "np. TeamId",
+        placeholder = "e.g. TeamId",
         value = Config.CustomTeamKey,
         forgetState = true,
         callback = function(text)
@@ -2005,7 +2017,7 @@ local updateConnection = RunService.Heartbeat:Connect(cwrap(function(dt)
     if State.Unloaded then return end
 
     local ok, err = pcall(function()
-        local now = tick()
+        local now = os.clock()
 
         if now - lastEntityScan >= Config.ScanInterval then
             lastEntityScan = now
@@ -2027,16 +2039,13 @@ local updateConnection = RunService.Heartbeat:Connect(cwrap(function(dt)
             task.spawn(scanScriptEnvironments)
         end
 
-        if not (Camera and Camera.Parent) then
-            Camera = Workspace and (Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera"))
-        end
-
         local lpChar = LocalPlayer and LocalPlayer.Character
         local lpHum  = lpChar and lpChar:FindFirstChildOfClass("Humanoid")
 
         if lpHum and lpHum.MaxHealth > 0 and lpHum.Health <= 0 then
             for _, data in pairs(State.TrackedCharacters) do
                 if data and data ~= false then
+                    data.ShouldDraw = false
                     hideDrawings(data)
                     if data.Highlight and data.Highlight.Enabled then data.Highlight.Enabled = false end
                     if data.Billboard and data.Billboard.Enabled  then data.Billboard.Enabled  = false end
@@ -2104,19 +2113,26 @@ local updateConnection = RunService.Heartbeat:Connect(cwrap(function(dt)
 end))
 table.insert(State.Connections, updateConnection)
 
+if HAS_DRAW then
+    local renderConnection = RunService.RenderStepped:Connect(cwrap(function()
+        if State.Unloaded then return end
+        for character, data in pairs(State.TrackedCharacters) do
+            if data and data ~= false then
+                if data.ShouldDraw and character and character.Parent then
+                    updateDrawings(data, data.RootPart, data.DrawColor, data.Humanoid)
+                else
+                    hideDrawings(data)
+                end
+            end
+        end
+    end))
+    table.insert(State.Connections, renderConnection)
+end
+
 -- ===========================
 -- Input
 -- ===========================
 connect(UserInputService.InputBegan, function(input, processed)
-    -- Key-binding capture mode from the menu
-    if _bindCapture then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local cb = _bindCapture
-            _bindCapture = nil
-            cb(input.KeyCode)
-        end
-        return
-    end
     if processed then return end
     if input.KeyCode == Config.ToggleKey then
         State.ESP.Enabled = not State.ESP.Enabled
