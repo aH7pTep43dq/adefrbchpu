@@ -1,15 +1,15 @@
 -- ============================================================
--- Universal ESP — poprawiona i zoptymalizowana wersja
--- Pomysły na wygląd (obrys boxa, pasek zdrowia przy boxie, wyświetlanie
--- przedmiotu w ręku, wzorzec Overrides) zaczerpnięte z biblioteki ESP
--- IonHub (tatar0071, tested). Kod napisany od nowa pod ten skrypt.
+-- Universal ESP — fixed and optimized version
+-- Visual ideas (box outline, health bar next to the box, held item
+-- display, the Overrides pattern) taken from the ESP library
+-- IonHub (tatar0071, tested). Code rewritten from scratch for this script.
 -- ============================================================
 
 local _r = tostring(math.random(1e5, 9e5))
 local visualFolderName = "ESPVisual_" .. _r
 
 -- ===========================
--- Zapobieganie wielokrotnemu uruchomieniu
+-- Preventing multiple instances
 -- ===========================
 if getgenv then
     local prev = getgenv().UniversalESP_Instance
@@ -19,7 +19,7 @@ if getgenv then
 end
 
 -- ===========================
--- Helpery środowiska
+-- Environment helpers
 -- ===========================
 local cref  = cloneref  or function(x) return x end
 local cwrap = newcclosure or function(fn) return fn end
@@ -86,8 +86,8 @@ local Config = {
         "Enemies","Players","Characters","Entities","NPCs",
     },
 
-    -- Tylko nazwy jednoznacznie oznaczające drużynę. „Class”, „Group”, „Guild”, „Clan”
-    -- celowo usunięte: sojusznicy o różnych klasach byli wtedy liczeni jako wrogowie.
+    -- Only names that unambiguously denote a team. "Class", "Group", "Guild", "Clan"
+    -- were removed on purpose: allies with different classes were then counted as enemies.
     TeamAttributeNames = {
         "Team","team","TeamId","TeamID","teamId","TeamName","TeamNumber",
         "Faction","faction","Side","side","Alliance","alliance",
@@ -98,13 +98,13 @@ local Config = {
     TeamLeaderstatsKeys = {
         "Team","Faction","Side","Alliance",
     },
-    -- Źródło informacji o drużynie: Auto / Team / TeamColor / Atrybut / Folder / Kolor ciała
+    -- Team info source: Auto / Team / TeamColor / Attribute / Folder / Body color
     TeamSource    = "Auto",
-    -- Własna nazwa atrybutu lub obiektu Value z drużyną (puste = brak)
+    -- Custom attribute or Value object name holding the team (empty = none)
     CustomTeamKey = "",
     NeutralIsEnemy   = true,
-    AutoFFA          = false,  -- jedna wspólna drużyna = FFA (w co-op wyłączone)
-    NameEnemiesOnly  = true,   -- nick tylko u przeciwników (sojusznicy bez nicku)
+    AutoFFA          = false,  -- one shared team = FFA (disabled in co-op)
+    NameEnemiesOnly  = true,   -- name only on enemies (allies without a name)
     UseEnemyCache    = true,
     EnemyCacheTTL    = 1.5,
 
@@ -135,24 +135,24 @@ local State = {
 }
 
 -- ===========================
--- Zapis / Odczyt konfiguracji
+-- Saving / Loading config
 -- ===========================
 local HttpService = gs("HttpService")
 
--- Klucze zapisywane z Config (whitelist – chroni tabele typu ExtraContainerNames)
+-- Keys saved from Config (whitelist – protects tables like ExtraContainerNames)
 local CONFIG_KEYS = {
     "TeamCheck","IgnoreNeutral","ShowBots","Watermark","VisibilityCheck","AutoFFA","NameEnemiesOnly","TeamSource","CustomTeamKey",
     "ScanDepth","ScanTerrain","ScanInterval","DeepRigSearch",
     "UseNilScan","UseGetInstances","UseMetaHook","UseScriptEnvScan",
 }
--- Klucze zapisywane ze State.ESP (w pliku z prefiksem ESP_)
+-- Keys saved from State.ESP (in the file with the ESP_ prefix)
 local ESP_KEYS = {
     "Enabled","Glow","Name","Distance","Range","TeamColor","Transparency",
     "HealthBar","Box","Tracers","Tool",
 }
 
 local CONFIG_VERSION = 3
--- Opcje wpływające na wydajność – ignorowane z plików w starym formacie
+-- Performance-affecting options – ignored from files in the old format
 local PERF_KEYS = {
     ScanInterval = true, UseNilScan = true, UseGetInstances = true,
     UseMetaHook = true, UseScriptEnvScan = true, AutoFFA = true,
@@ -178,7 +178,7 @@ local function saveConfig()
         if not isfolder(Config.SaveFolder) then
             makefolder(Config.SaveFolder)
         end
-        Config.Watermark = State.Watermark.Enabled  -- GUI zmienia State, nie Config
+        Config.Watermark = State.Watermark.Enabled  -- the GUI changes State, not Config
         local data = {}
         for _, k in ipairs(CONFIG_KEYS) do data[k] = Config[k] end
         for _, k in ipairs(ESP_KEYS)    do data["ESP_" .. k] = State.ESP[k] end
@@ -201,10 +201,10 @@ local function loadConfig()
         local raw = readfile(path)
         if type(raw) ~= "string" or raw == "" then return end
 
-        -- Uszkodzony plik nie może wywalić skryptu
+        -- A corrupted file must not crash the script
         local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
         if not ok or type(data) ~= "table" then
-            warn("[Universal ESP] Uszkodzony plik konfiguracji – uzywam domyslnych.")
+            warn("[Universal ESP] Corrupted config file – using defaults.")
             return
         end
 
@@ -223,6 +223,10 @@ local function loadConfig()
         Config.HiddenColor  = hexToC3(data.HiddenColor)  or Config.HiddenColor
         State.Watermark.Enabled = Config.Watermark
 
+        -- migrate legacy (Polish) TeamSource values from older config files
+        if Config.TeamSource == "Atrybut" then Config.TeamSource = "Attribute"
+        elseif Config.TeamSource == "Kolor ciała" then Config.TeamSource = "Body color" end
+
         for _, kname in ipairs({ "ToggleKey", "GuiKey", "UnloadKey" }) do
             local nm = data[kname]
             if type(nm) == "string" then
@@ -236,7 +240,7 @@ end
 loadConfig()
 
 -- ===========================
--- Cache drużyn Roblox
+-- Roblox teams cache
 -- ===========================
 local _teamsCache     = nil
 local _teamsCacheTime = 0
@@ -262,7 +266,7 @@ local function connect(signal, fn)
 end
 
 -- ===========================
--- Zaawansowany TeamCheck
+-- Advanced TeamCheck
 -- ===========================
 local _enemyCache      = {}
 local _enemyCacheConns = {}
@@ -277,7 +281,7 @@ local function invalidateEnemyCache(character)
     end
 end
 
-local TEAM_SOURCES = { "Auto", "Team", "TeamColor", "Atrybut", "Folder", "Kolor ciała" }
+local TEAM_SOURCES = { "Auto", "Team", "TeamColor", "Attribute", "Folder", "Body color" }
 
 local function normId(v)
     local str = tostring(v):lower():gsub("^%s+", ""):gsub("%s+$", "")
@@ -287,7 +291,7 @@ local function normId(v)
     return str
 end
 
--- Wartość o danej nazwie: atrybut albo obiekt ValueBase wewnątrz instancji
+-- Value with the given name: an attribute or a ValueBase object inside the instance
 local function readNamed(inst, name)
     local ok, val = pcall(function() return inst:GetAttribute(name) end)
     if ok and val ~= nil then return val end
@@ -302,7 +306,7 @@ local function readNamed(inst, name)
     return nil
 end
 
--- 1. Drużyna Roblox (nazwa + kolor, żeby drużyny o tej samej nazwie się nie zlewały)
+-- 1. Roblox team (name + color so teams with the same name don't merge)
 local function srcRobloxTeam(obj)
     local ok, team = pcall(function() return obj.Team end)
     if ok and team and typeof(team) == "Instance" and team:IsA("Team") then
@@ -312,7 +316,7 @@ local function srcRobloxTeam(obj)
     return nil
 end
 
--- 2. TeamColor (force = także domyślne kolory)
+-- 2. TeamColor (force = default colors too)
 local function srcTeamColor(obj, force)
     local ok, tc = pcall(function() return obj.TeamColor end)
     if ok and tc and typeof(tc) == "BrickColor" then
@@ -324,7 +328,7 @@ local function srcTeamColor(obj, force)
     return nil
 end
 
--- 3. Własny klucz podany w menu
+-- 3. Custom key set in the menu
 local function srcKey(obj, character)
     local key = Config.CustomTeamKey
     if type(key) ~= "string" or key == "" then return nil end
@@ -337,7 +341,7 @@ local function srcKey(obj, character)
     return nil
 end
 
--- 4. Atrybuty, obiekty Value i leaderstats o typowych nazwach
+-- 4. Attributes, Value objects and leaderstats with typical names
 local function srcCustom(obj, character)
     for _, attrName in ipairs(Config.TeamAttributeNames) do
         local ok, val = pcall(function() return obj:GetAttribute(attrName) end)
@@ -393,14 +397,14 @@ local function srcCustom(obj, character)
     return nil
 end
 
--- 5. Folder, w którym leży postać (np. Workspace.Teams.Red.Gracz)
+-- 5. Folder containing the character (e.g. Workspace.Teams.Red.Player)
 local function srcFolder(character)
     local par = character and character.Parent
     if par and par ~= Workspace then return normId(par.Name) end
     return nil
 end
 
--- 6. Kolor ciała (drużyny rozróżniane mundurami / kolorem modelu)
+-- 6. Body color (teams told apart by uniforms / model color)
 local function srcBodyColor(character)
     if not character then return nil end
     local c
@@ -426,11 +430,11 @@ local function getTeamId(obj, character)
 
     if mode == "Team"        then return srcRobloxTeam(obj) end
     if mode == "TeamColor"   then return srcTeamColor(obj, true) end
-    if mode == "Atrybut"     then return srcKey(obj, character) or srcCustom(obj, character) end
+    if mode == "Attribute"     then return srcKey(obj, character) or srcCustom(obj, character) end
     if mode == "Folder"      then return srcFolder(character or obj) end
-    if mode == "Kolor ciała" then return srcBodyColor(character or obj) end
+    if mode == "Body color" then return srcBodyColor(character or obj) end
 
-    -- Auto: własny klucz > Team > TeamColor (gdy brak Team) > atrybuty/Value/leaderstats
+    -- Auto: custom key > Team > TeamColor (when no Team) > attributes/Value/leaderstats
     local id = srcKey(obj, character)
     if id then return id end
     id = srcRobloxTeam(obj)
@@ -443,7 +447,7 @@ local function getTeamId(obj, character)
     return srcCustom(obj, character)
 end
 
--- Opis danych gracza/postaci do diagnostyki (atrybuty, obiekty Value, leaderstats)
+-- Description of player/character data for diagnostics (attributes, Value objects, leaderstats)
 local function describeTeamData(inst)
     if not inst then return "(brak)" end
     local parts = {}
@@ -475,7 +479,7 @@ local function describeTeamData(inst)
     return #parts > 0 and table.concat(parts, ", ") or "(brak)"
 end
 
--- Czyści wszystkie cache drużyn (wywoływane np. gdy ja zmienię drużynę)
+-- Clears all team caches (called e.g. when I change team)
 local _myTeamId, _myTeamTime = nil, -1e9
 local _singleTeam, _singleTeamTime = false, -1e9
 local _allyCache = {}
@@ -495,8 +499,8 @@ local function getMyTeamId()
     return _myTeamId
 end
 
--- true, gdy wszyscy gracze (min. 3) są w tej samej drużynie Roblox,
--- co zwykle oznacza grę bez prawdziwych drużyn (FFA z jedną domyślną drużyną)
+-- true when all players (min. 3) are on the same Roblox team,
+-- which usually means a game without real teams (FFA with a single default team)
 local function isSingleTeamServer()
     local now = tick()
     if now - _singleTeamTime >= 2 then
@@ -570,7 +574,7 @@ end
 -- ===========================
 -- isEnemy
 -- ===========================
--- Opcjonalne nadpisania pod konkretną grę, np. w konsoli executora:
+-- Optional per-game overrides, e.g. from the executor console:
 --   getgenv().UniversalESP_Instance.Overrides.IsEnemy = function(char, plr) return true end
 --   getgenv().UniversalESP_Instance.Overrides.GetTool = function(char, plr) return "..." end
 local Overrides = { IsEnemy = nil, GetTool = nil }
@@ -616,7 +620,7 @@ local function isEnemy(character, player)
 
         if myTeamId and theirTeamId then
             if Config.TeamCheck and myTeamId == theirTeamId then
-                -- Wszyscy w jednej drużynie = brak realnych drużyn, więc nikt nie jest sojusznikiem
+                -- Everyone on one team = no real teams, so nobody is an ally
                 if not (Config.AutoFFA and isSingleTeamServer()) then
                     return false
                 end
@@ -658,7 +662,7 @@ local function isEnemy(character, player)
 end
 
 -- ===========================
--- isAlly: czy postać jest w MOJEJ drużynie (niezależnie od TeamCheck)
+-- isAlly: whether the character is on MY team (regardless of TeamCheck)
 -- ===========================
 local function isAlly(character, player)
     if not character then return false end
@@ -791,7 +795,7 @@ if State.Watermark.Enabled then
             d.Size = 14; d.Position = Vector2.new(16, 16)
             d.Color = Color3.fromRGB(240, 240, 240); d.Outline = true
             d.OutlineColor = Color3.fromRGB(0, 0, 0); d.Font = 2
-            d.Visible = true; d.Text = "Universal ESP | Inicjalizacja..."
+            d.Visible = true; d.Text = "Universal ESP | Initializing..."
             watermarkDraw = d
         end)
     else
@@ -815,7 +819,7 @@ if State.Watermark.Enabled then
             watermarkLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             watermarkLabel.TextStrokeTransparency = 0
             watermarkLabel.TextXAlignment = Enum.TextXAlignment.Left
-            watermarkLabel.Text = "Universal ESP | Inicjalizacja..."
+            watermarkLabel.Text = "Universal ESP | Initializing..."
             watermarkLabel.Parent = watermarkGui
             watermarkGui.Parent = parent
         end
@@ -918,7 +922,7 @@ local function createVisualForCharacter(character, player)
     toolLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
     toolLabel.Text = ""; toolLabel.Visible = false; toolLabel.Parent = mainFrame
 
-    -- Pasek zdrowia (działa bez Drawing API)
+    -- Health bar (works without the Drawing API)
     local healthBack = Instance.new("Frame")
     healthBack.Name = "HealthBack"
     healthBack.Size = UDim2.new(0, 80, 0, 5)
@@ -935,7 +939,7 @@ local function createVisualForCharacter(character, player)
     healthFill.BorderSizePixel = 0
     healthFill.Parent = healthBack
 
-    -- Box, obrys, tracer i pasek zdrowia przy boxie (wymagają Drawing API)
+    -- Box, outline, tracer and health bar next to the box (require the Drawing API)
     local box, boxOutline, tracer, hpBack, hpFill
     if HAS_DRAW then
         pcall(function()
@@ -984,9 +988,9 @@ end
 -- Unload
 -- ===========================
 local _configGui = nil
-local _guiRefreshAll = nil   -- ustawiane przez GUI
-local _guiToggle = nil       -- pokaż/ukryj okno (ustawiane przez GUI)
-local _bindCapture = nil     -- tryb przypisywania klawisza z GUI
+local _guiRefreshAll = nil   -- set by the GUI
+local _guiToggle = nil       -- show/hide the window (set by the GUI)
+local _bindCapture = nil     -- key-binding capture mode from the GUI
 
 local function unload()
     if State.Unloaded then return end
@@ -1010,7 +1014,7 @@ local function unload()
     if getgenv and getgenv().UniversalESP_Instance then
         getgenv().UniversalESP_Instance = nil
     end
-    print("[Universal ESP] Skrypt zostal calkowicie wyczyszczony.")
+    print("[Universal ESP] Script fully cleaned up.")
 end
 
 if getgenv then
@@ -1034,10 +1038,10 @@ local function setVisible(d, v)
 end
 
 local function hpColor(pct)
-    return Color3.fromHSV(pct * 0.33, 0.85, 1)  -- czerwony -> zielony
+    return Color3.fromHSV(pct * 0.33, 0.85, 1)  -- red -> green
 end
 
--- Pasek zdrowia w billboardzie: tylko gdy brak Drawing API
+-- Health bar in the billboard: only when the Drawing API is missing
 local function updateHealthBar(data, humanoid)
     local back, fill = data.HealthBack, data.HealthFill
     if not (back and fill) then return end
@@ -1053,7 +1057,7 @@ local function updateHealthBar(data, humanoid)
     end
 end
 
--- Nazwa trzymanego przedmiotu (odświeżana 4x/s)
+-- Name of the held item (refreshed 4x/s)
 local function updateTool(data, character, now)
     local label = data.ToolLabel
     if not label then return end
@@ -1078,7 +1082,7 @@ local function updateTool(data, character, now)
 end
 
 local function updateDrawings(data, rootPart, color, humanoid)
-    if not data.Box then return end  -- brak Drawing API
+    if not data.Box then return end  -- no Drawing API
 
     local wantBox, wantTr, wantHp = State.ESP.Box, State.ESP.Tracers, State.ESP.HealthBar
     local cam = Camera
@@ -1097,7 +1101,7 @@ local function updateDrawings(data, rootPart, color, humanoid)
     local x0     = center.X - width / 2
     local y0     = math.min(top.Y, bottom.Y)
 
-    -- Box z czarnym obrysem
+    -- Box with a black outline
     if wantBox then
         local size, pos = Vector2.new(width, height), Vector2.new(x0, y0)
         data.Box.Size = size;        data.Box.Position = pos;        data.Box.Color = color
@@ -1106,7 +1110,7 @@ local function updateDrawings(data, rootPart, color, humanoid)
     setVisible(data.Box, wantBox)
     setVisible(data.BoxOutline, wantBox)
 
-    -- Pasek zdrowia po lewej stronie boxa (obrys + wypełnienie)
+    -- Health bar on the left side of the box (outline + fill)
     local showHp = wantHp and humanoid ~= nil and humanoid.MaxHealth > 0
     if showHp and data.HpBack and data.HpFill then
         local pct  = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
@@ -1165,7 +1169,7 @@ local function updateVisual(character, data, lpChar, lpRoot, excludeTable)
         if not rootPart then hideAll(); return end
     end
 
-    local distance = (lpRoot and (rootPart.Position - lpRoot.Position).Magnitude or 0) * 0.28  -- studs -> metry
+    local distance = (lpRoot and (rootPart.Position - lpRoot.Position).Magnitude or 0) * 0.28  -- studs -> meters
     if distance > State.ESP.Range then hideAll(); return end
 
     local targetAdornee = data.Head
@@ -1221,7 +1225,7 @@ local function updateVisual(character, data, lpChar, lpRoot, excludeTable)
 end
 
 -- ===========================
--- Wykrywanie postaci
+-- Character detection
 -- ===========================
 local function looksLikeCharacter(model)
     local humanoid
@@ -1314,7 +1318,7 @@ local function nameMatchesContainerList(name)
 end
 
 -- ===========================
--- setupPlayer (przed użyciem w scanScriptEnvironments)
+-- setupPlayer (before use in scanScriptEnvironments)
 -- ===========================
 local function setupPlayer(player)
     if State.Unloaded then return end
@@ -1397,7 +1401,7 @@ local function scanAllInstances()
     for _, inst in ipairs(instances) do
         n += 1
         if n % 400 == 0 then
-            task.wait()  -- oddaj klatkę, skan trwa w tle
+            task.wait()  -- yield the frame, the scan continues in the background
             if State.Unloaded or not Config.UseGetInstances then return end
         end
         local okc, className = pcall(_getClass, inst)
@@ -1577,7 +1581,7 @@ local function scanAll()
 end
 
 -- ===========================
--- Inicjalizacja Players + Workspace listeners
+-- Players + Workspace listeners initialization
 -- ===========================
 if LocalPlayer then
     pcall(function()
@@ -1628,7 +1632,7 @@ task.defer(function()
 end)
 
 -- ===========================
--- GUI Konfiguracji (F2) — Rayfield Gen2
+-- Config GUI (F2) — Rayfield Gen2
 -- ===========================
 local function buildConfigGui()
     local okLib, Rayfield = pcall(function()
@@ -1636,7 +1640,7 @@ local function buildConfigGui()
     end)
     if State.Unloaded then return end
     if not okLib or not Rayfield then
-        warn("[Universal ESP] Nie udalo sie zaladowac Rayfield Gen2: " .. tostring(Rayfield))
+        warn("[Universal ESP] Failed to load Rayfield Gen2: " .. tostring(Rayfield))
         return
     end
 
@@ -1646,7 +1650,7 @@ local function buildConfigGui()
         sidebarLayout = true,
     })
 
-    -- Rejestr odświeżania widgetów (po F1, po resecie, po otwarciu menu)
+    -- Widget refresh registry (after F1, after reset, after opening the menu)
     local refreshers = {}
     local function addRefresher(fn) refreshers[#refreshers + 1] = fn end
     local function refreshAll()
@@ -1662,13 +1666,13 @@ local function buildConfigGui()
     end
 
     -- ===========================
-    -- Helpery elementów (wszystkie z forgetState: zapis robi sam skrypt)
+    -- Element helpers (all with forgetState: the script does its own saving)
     -- ===========================
     local function divider(tab, text)
         tab:CreateDivider({ text = text })
     end
 
-    -- Przełącznik podpięty pod pole tabeli (Config / State.ESP)
+    -- Toggle bound to a table field (Config / State.ESP)
     local function bind(tab, text, tbl, key, onChange)
         local h = tab:CreateToggle({
             name = text,
@@ -1729,13 +1733,13 @@ local function buildConfigGui()
             name = text,
             callback = function()
                 local ok, err = pcall(callback)
-                if not ok then warn("[Universal ESP] Blad przycisku: " .. tostring(err)) end
+                if not ok then warn("[Universal ESP] Button error: " .. tostring(err)) end
             end,
         })
     end
 
     -- ===========================
-    -- Funkcje pomocnicze logiki
+    -- Logic helper functions
     -- ===========================
     local function updateHighlightTransparency()
         for _, d in pairs(State.TrackedCharacters) do
@@ -1772,51 +1776,51 @@ local function buildConfigGui()
     end
 
     -- ===========================
-    -- Zakładka: ESP
+    -- Tab: ESP
     -- ===========================
     local tESP = window:CreateTab({ name = "ESP", icon = 0 })
-    divider(tESP, "Wyświetlanie")
-    bind(tESP, "Włącz ESP",            State.ESP, "Enabled")
-    bind(tESP, "Podświetlenie (Glow)", State.ESP, "Glow")
-    bind(tESP, "Nazwa gracza",         State.ESP, "Name")
-    bind(tESP, "Dystans",              State.ESP, "Distance")
-    bind(tESP, "Przedmiot w ręku",     State.ESP, "Tool")
-    bind(tESP, "Pasek zdrowia",        State.ESP, "HealthBar")
+    divider(tESP, "Display")
+    bind(tESP, "Enable ESP",            State.ESP, "Enabled")
+    bind(tESP, "Highlight (Glow)", State.ESP, "Glow")
+    bind(tESP, "Player name",         State.ESP, "Name")
+    bind(tESP, "Distance",              State.ESP, "Distance")
+    bind(tESP, "Held item",     State.ESP, "Tool")
+    bind(tESP, "Health bar",        State.ESP, "HealthBar")
     bind(tESP, "Box ESP (Drawing)",    State.ESP, "Box")
-    bind(tESP, "Tracery (Drawing)",    State.ESP, "Tracers")
-    bind(tESP, "Kolor drużyny",        State.ESP, "TeamColor")
-    divider(tESP, "Parametry")
-    slider(tESP, "Zasięg", 100, 10000, 50,
+    bind(tESP, "Tracers (Drawing)",    State.ESP, "Tracers")
+    bind(tESP, "Team color",        State.ESP, "TeamColor")
+    divider(tESP, "Parameters")
+    slider(tESP, "Range", 100, 10000, 50,
         function() return State.ESP.Range end,
         function(v) State.ESP.Range = v end, " m")
-    slider(tESP, "Przezroczystość wypełnienia", 0, 100, 1,
+    slider(tESP, "Fill transparency", 0, 100, 1,
         function() return math.floor(State.ESP.Transparency * 100 + 0.5) end,
         function(v) State.ESP.Transparency = v / 100; updateHighlightTransparency() end, "%")
-    divider(tESP, "Kolory")
-    colorPicker(tESP, "Widoczny",  "VisibleColor")
-    colorPicker(tESP, "Za ścianą", "HiddenColor")
+    divider(tESP, "Colors")
+    colorPicker(tESP, "Visible",  "VisibleColor")
+    colorPicker(tESP, "Behind wall", "HiddenColor")
 
     -- ===========================
-    -- Zakładka: Filtry
+    -- Tab: Filters
     -- ===========================
-    local tFilt = window:CreateTab({ name = "Filtry", icon = 0 })
-    divider(tFilt, "Drużyny")
-    bind(tFilt, "Sprawdź drużyny",      Config, "TeamCheck",       clearAllEnemyCache)
-    bind(tFilt, "Ignoruj neutralnych",  Config, "IgnoreNeutral",   clearAllEnemyCache)
-    bind(tFilt, "Neutral = Wróg",       Config, "NeutralIsEnemy",  clearAllEnemyCache)
-    bind(tFilt, "Auto-FFA (1 drużyna)", Config, "AutoFFA",         clearAllEnemyCache)
-    bind(tFilt, "Nick tylko wrogów",    Config, "NameEnemiesOnly", clearAllEnemyCache)
-    divider(tFilt, "Cele")
-    bind(tFilt, "Pokaż boty / NPC",     Config, "ShowBots")
-    bind(tFilt, "Sprawdź widoczność",   Config, "VisibilityCheck")
+    local tFilt = window:CreateTab({ name = "Filters", icon = 0 })
+    divider(tFilt, "Teams")
+    bind(tFilt, "Team check",      Config, "TeamCheck",       clearAllEnemyCache)
+    bind(tFilt, "Ignore neutrals",  Config, "IgnoreNeutral",   clearAllEnemyCache)
+    bind(tFilt, "Neutral = Enemy",       Config, "NeutralIsEnemy",  clearAllEnemyCache)
+    bind(tFilt, "Auto-FFA (1 team)", Config, "AutoFFA",         clearAllEnemyCache)
+    bind(tFilt, "Name enemies only",    Config, "NameEnemiesOnly", clearAllEnemyCache)
+    divider(tFilt, "Targets")
+    bind(tFilt, "Show bots / NPCs",     Config, "ShowBots")
+    bind(tFilt, "Visibility check",   Config, "VisibilityCheck")
 
     -- ===========================
-    -- Zakładka: Drużyny
+    -- Tab: Teams
     -- ===========================
-    local tTeam = window:CreateTab({ name = "Drużyny", icon = 0 })
-    divider(tTeam, "Źródło drużyn")
+    local tTeam = window:CreateTab({ name = "Teams", icon = 0 })
+    divider(tTeam, "Team source")
     local ddSource = tTeam:CreateDropdown({
-        name = "Źródło wykrywania",
+        name = "Detection source",
         options = TEAM_SOURCES,
         value = Config.TeamSource,
         forgetState = true,
@@ -1831,7 +1835,7 @@ local function buildConfigGui()
     addRefresher(function() ddSource:Set(Config.TeamSource, true) end)
 
     local inKey = tTeam:CreateInput({
-        name = "Własny klucz (atrybut/Value)",
+        name = "Custom key (attribute/Value)",
         placeholder = "np. TeamId",
         value = Config.CustomTeamKey,
         forgetState = true,
@@ -1842,104 +1846,104 @@ local function buildConfigGui()
     })
     addRefresher(function() inKey:Set(Config.CustomTeamKey, true) end)
 
-    divider(tTeam, "Narzędzia")
-    button(tTeam, "Pokaż wykryty system drużyn", function()
+    divider(tTeam, "Tools")
+    button(tTeam, "Show detected team system", function()
         local teamsList = getCachedTeams()
         local myId = getMyTeamId()
         local line
         if #teamsList > 0 then
-            line = "Roblox Teams: " .. #teamsList .. " | Ja: " .. tostring(myId or "?")
+            line = "Roblox Teams: " .. #teamsList .. " | Me: " .. tostring(myId or "?")
         elseif myId then
-            line = "Własny system | Ja: " .. tostring(myId)
+            line = "Custom system | Me: " .. tostring(myId)
         else
-            line = "FFA / brak drużyn"
+            line = "FFA / no teams"
         end
         local ffa = Config.AutoFFA and isSingleTeamServer()
-        notify("System drużyn", line .. " | Auto-FFA: " .. (ffa and "tak" or "nie"), 6)
+        notify("Team system", line .. " | Auto-FFA: " .. (ffa and "yes" or "no"), 6)
     end)
-    button(tTeam, "Odśwież drużyny", function()
+    button(tTeam, "Refresh teams", function()
         _teamsCache = nil
         clearAllEnemyCache()
-        notify("Cache drużyn", "Odświeżono informacje o drużynach.")
+        notify("Teams cache", "Team info refreshed.")
     end)
-    button(tTeam, "Diagnostyka (wynik w konsoli F9)", function()
+    button(tTeam, "Diagnostics (output in the F9 console)", function()
         clearAllEnemyCache()
         local function folderName(ch) return (ch and ch.Parent and ch.Parent.Name) or "-" end
-        print("[Universal ESP] ===== Diagnostyka druzyn =====")
-        print(string.format("Zrodlo: %s | klucz wlasny: '%s' | Auto-FFA aktywne: %s",
+        print("[Universal ESP] ===== Team diagnostics =====")
+        print(string.format("Source: %s | custom key: '%s' | Auto-FFA active: %s",
             tostring(Config.TeamSource), tostring(Config.CustomTeamKey),
             tostring(Config.AutoFFA and isSingleTeamServer())))
         if LocalPlayer then
-            print(string.format("JA %s | id: %s | folder: %s",
+            print(string.format("ME %s | id: %s | folder: %s",
                 LocalPlayer.Name, tostring(getMyTeamId()), folderName(LocalPlayer.Character)))
-            print("  gracz:  " .. describeTeamData(LocalPlayer))
-            print("  postac: " .. describeTeamData(LocalPlayer.Character))
+            print("  player:    " .. describeTeamData(LocalPlayer))
+            print("  character: " .. describeTeamData(LocalPlayer.Character))
         end
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then
                 local ch = p.Character
-                print(string.format("%s | id: %s | wrog: %s | sojusznik: %s | folder: %s",
+                print(string.format("%s | id: %s | enemy: %s | ally: %s | folder: %s",
                     p.Name, tostring(getTeamId(p, ch)), tostring(ch and isEnemy(ch, p)),
                     tostring(ch and isAlly(ch, p)), folderName(ch)))
-                print("  gracz:  " .. describeTeamData(p))
-                print("  postac: " .. describeTeamData(ch))
+                print("  player:    " .. describeTeamData(p))
+                print("  character: " .. describeTeamData(ch))
             end
         end
-        notify("Diagnostyka", "Wynik został wypisany w konsoli (F9).")
+        notify("Diagnostics", "Output printed to the console (F9).")
     end)
     divider(tTeam, "Cache")
-    bind(tTeam, "Cache drużyn (szybszy)", Config, "UseEnemyCache", clearAllEnemyCache)
+    bind(tTeam, "Teams cache (faster)", Config, "UseEnemyCache", clearAllEnemyCache)
     slider(tTeam, "Cache TTL", 1, 10, 1,
         function() return math.floor(Config.EnemyCacheTTL) end,
         function(v) Config.EnemyCacheTTL = v; clearAllEnemyCache() end, " s")
 
     -- ===========================
-    -- Zakładka: Skan
+    -- Tab: Scan
     -- ===========================
-    local tScan = window:CreateTab({ name = "Skan", icon = 0 })
-    divider(tScan, "Wykrywanie postaci")
-    bind(tScan, "Głęboki skan rigów", Config, "DeepRigSearch")
-    bind(tScan, "Skanuj Terrain",     Config, "ScanTerrain")
-    slider(tScan, "Głębokość skanu", 1, 6, 1,
+    local tScan = window:CreateTab({ name = "Scan", icon = 0 })
+    divider(tScan, "Character detection")
+    bind(tScan, "Deep rig search", Config, "DeepRigSearch")
+    bind(tScan, "Scan Terrain",     Config, "ScanTerrain")
+    slider(tScan, "Scan depth", 1, 6, 1,
         function() return Config.ScanDepth end,
         function(v) Config.ScanDepth = v end)
-    slider(tScan, "Interwał skanu", 100, 3000, 100,
+    slider(tScan, "Scan interval", 100, 3000, 100,
         function() return math.floor(Config.ScanInterval * 1000 + 0.5) end,
         function(v) Config.ScanInterval = v / 1000 end, " ms")
 
     -- ===========================
-    -- Zakładka: Zaawansowane
+    -- Tab: Advanced
     -- ===========================
-    local tAdv = window:CreateTab({ name = "Zaawansowane", icon = 0 })
-    divider(tAdv, "Metody (ciężkie – mogą obniżać FPS)")
+    local tAdv = window:CreateTab({ name = "Advanced", icon = 0 })
+    divider(tAdv, "Methods (heavy – may lower FPS)")
     bind(tAdv, "Nil Instance Scan", Config, "UseNilScan")
     bind(tAdv, "Full Memory Scan",  Config, "UseGetInstances")
     bind(tAdv, "Meta Hook", Config, "UseMetaHook", function(v)
         if v then installMetaHook(); installNewIndexHook() end
     end)
     bind(tAdv, "Script Env Scan",   Config, "UseScriptEnvScan")
-    divider(tAdv, "Interwały")
-    slider(tAdv, "Nil Scan co", 2, 30, 1,
+    divider(tAdv, "Intervals")
+    slider(tAdv, "Nil Scan every", 2, 30, 1,
         function() return math.floor(Config.NilScanInterval) end,
         function(v) Config.NilScanInterval = v end, " s")
-    slider(tAdv, "Memory Scan co", 5, 60, 1,
+    slider(tAdv, "Memory Scan every", 5, 60, 1,
         function() return math.floor(Config.GetInstancesInterval) end,
         function(v) Config.GetInstancesInterval = v end, " s")
-    slider(tAdv, "Script Scan co", 5, 60, 1,
+    slider(tAdv, "Script Scan every", 5, 60, 1,
         function() return math.floor(Config.ScriptEnvInterval) end,
         function(v) Config.ScriptEnvInterval = v end, " s")
 
     -- ===========================
-    -- Zakładka: Ustawienia
+    -- Tab: Settings
     -- ===========================
-    local tSet = window:CreateTab({ name = "Ustawienia", icon = 0 })
-    divider(tSet, "Skróty klawiszowe")
-    keybind(tSet, "Włącz / wyłącz ESP",    "ToggleKey")
-    keybind(tSet, "Otwórz / zamknij menu", "GuiKey")
-    keybind(tSet, "Wyładuj skrypt",        "UnloadKey")
-    divider(tSet, "Interfejs")
+    local tSet = window:CreateTab({ name = "Settings", icon = 0 })
+    divider(tSet, "Hotkeys")
+    keybind(tSet, "Toggle ESP",    "ToggleKey")
+    keybind(tSet, "Open / close menu", "GuiKey")
+    keybind(tSet, "Unload script",        "UnloadKey")
+    divider(tSet, "Interface")
     bind(tSet, "Watermark (FPS / Ping)", State.Watermark, "Enabled")
-    button(tSet, "Pokaż status ESP", function()
+    button(tSet, "Show ESP status", function()
         local tracked, shown = 0, 0
         for _, d in pairs(State.TrackedCharacters) do
             if d then
@@ -1949,25 +1953,25 @@ local function buildConfigGui()
                 end
             end
         end
-        notify("Status", string.format("Śledzone: %d | widoczne: %d | ESP %s",
+        notify("Status", string.format("Tracked: %d | visible: %d | ESP %s",
             tracked, shown, State.ESP.Enabled and "ON" or "OFF"))
     end)
-    divider(tSet, "Konfiguracja")
-    bind(tSet, "Auto-zapis przy wyładowaniu", Config, "SaveEnabled")
-    button(tSet, "Zapisz teraz", function()
+    divider(tSet, "Config")
+    bind(tSet, "Auto-save on unload", Config, "SaveEnabled")
+    button(tSet, "Save now", function()
         saveConfig()
-        notify("Konfiguracja", "Ustawienia zostały zapisane.")
+        notify("Config", "Settings saved.")
     end)
-    button(tSet, "Resetuj do domyślnych", function()
+    button(tSet, "Reset to defaults", function()
         resetDefaults()
-        notify("Konfiguracja", "Przywrócono ustawienia domyślne.")
+        notify("Config", "Defaults restored.")
     end)
-    button(tSet, "Wyładuj skrypt", function()
+    button(tSet, "Unload script", function()
         unload()
     end)
 
     -- ===========================
-    -- Podpięcie pod resztę skryptu
+    -- Hooking into the rest of the script
     -- ===========================
     _configGui = { Destroy = function() pcall(function() window:Unload() end) end }
     _guiRefreshAll = refreshAll
@@ -1982,16 +1986,16 @@ local function buildConfigGui()
     end
 
     notify("Universal ESP", Config.GuiKey.Name .. " – menu  |  " .. Config.ToggleKey.Name
-        .. " – ESP  |  " .. Config.UnloadKey.Name .. " – wyładuj", 5)
+        .. " – ESP  |  " .. Config.UnloadKey.Name .. " – unload", 5)
 end
 
 task.spawn(function()
     local ok, err = pcall(buildConfigGui)
-    if not ok then warn("[Universal ESP] Blad budowy GUI: " .. tostring(err)) end
+    if not ok then warn("[Universal ESP] GUI build error: " .. tostring(err)) end
 end)
 
 -- ===========================
--- Główna pętla Heartbeat
+-- Main Heartbeat loop
 -- ===========================
 local lastWatermarkUpdate = 0
 local lastEntityScan      = 0
@@ -2095,7 +2099,7 @@ local updateConnection = RunService.Heartbeat:Connect(cwrap(function(dt)
     end)
 
     if not ok then
-        warn("[Universal ESP] Blad w petli Heartbeat: " .. tostring(err))
+        warn("[Universal ESP] Heartbeat loop error: " .. tostring(err))
     end
 end))
 table.insert(State.Connections, updateConnection)
@@ -2104,7 +2108,7 @@ table.insert(State.Connections, updateConnection)
 -- Input
 -- ===========================
 connect(UserInputService.InputBegan, function(input, processed)
-    -- Tryb przypisywania klawisza z menu
+    -- Key-binding capture mode from the menu
     if _bindCapture then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             local cb = _bindCapture
@@ -2116,7 +2120,7 @@ connect(UserInputService.InputBegan, function(input, processed)
     if processed then return end
     if input.KeyCode == Config.ToggleKey then
         State.ESP.Enabled = not State.ESP.Enabled
-        print("[Universal ESP] ESP: " .. (State.ESP.Enabled and "Wlaczone" or "Wylaczone"))
+        print("[Universal ESP] ESP: " .. (State.ESP.Enabled and "Enabled" or "Disabled"))
         if _guiRefreshAll then _guiRefreshAll() end
     elseif input.KeyCode == Config.GuiKey then
         if _guiToggle then _guiToggle() end
@@ -2125,6 +2129,6 @@ connect(UserInputService.InputBegan, function(input, processed)
     end
 end)
 
-print("[Universal ESP] Zaladowano! [F1] Toggle | [F2] Konfiguracja | [END] Wylacz")
-print("[Universal ESP] Metody wykrywania: Workspace | NilScan | MemoryScan | MetaHook | ScriptEnv")
-print("[Universal ESP] Konfiguracja: " .. Config.SaveFolder .. "/" .. Config.SaveFile)
+print("[Universal ESP] Loaded! [F1] Toggle | [F2] Config | [END] Unload")
+print("[Universal ESP] Detection methods: Workspace | NilScan | MemoryScan | MetaHook | ScriptEnv")
+print("[Universal ESP] Config: " .. Config.SaveFolder .. "/" .. Config.SaveFile)
