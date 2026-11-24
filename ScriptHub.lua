@@ -1,18 +1,18 @@
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
 
 ----------------------------------------------------------------
--- LISTA SKRYPTÓW
--- Każdy wpis = jedna zakładka w lewym panelu.
---   name        - nazwa zakładki
---   description - opis pod przyciskiem
---   url         - link do surowego kodu (raw GitHub, Pastebin raw itp.)
---   source      - alternatywnie: kod wklejony bezpośrednio jako tekst
---   unload      - (opcjonalnie) funkcja wyłączająca skrypt
+-- SCRIPT LIST
+-- Each entry = one tab in the left panel.
+--   name        - tab name
+--   description - text under the button
+--   url         - link to the raw code (raw GitHub, Pastebin raw, etc.)
+--   source      - alternatively: code pasted directly as text
+--   unload      - (optional) function that turns the script off
 ----------------------------------------------------------------
 local SCRIPTS = {
     {
         name = "Universal ESP",
-        description = "ESP: glow, box, tracery, pasek zdrowia, filtry drużyn.",
+        description = "ESP: glow, box, tracers, health bar, team filters.",
         url = "https://raw.githubusercontent.com/aH7pTep43dq/adefrbchpu/main/UniversalESP.lua",
         unload = function()
             local inst = getgenv and getgenv().UniversalESP_Instance
@@ -25,21 +25,21 @@ local SCRIPTS = {
         url = "https://raw.githubusercontent.com/aH7pTep43dq/adefrbchpu/main/visuals_world.lua",
     },
     {
-        name = "Przykład (inline)",
-        description = "Przykład skryptu wklejonego bezpośrednio do huba.",
+        name = "Example (inline)",
+        description = "Example of a script pasted directly into the hub.",
         source = [[
-            print("Skrypt z huba działa!")
+            print("Script from the hub works!")
         ]],
     },
 }
 
 ----------------------------------------------------------------
--- OKNO
+-- WINDOW
 ----------------------------------------------------------------
 local window = Rayfield:CreateWindow({
     name = "Script Hub",
     subtitle = "Rayfield Gen2",
-    sidebarLayout = true, -- zakładki (skrypty) po lewej stronie
+    sidebarLayout = true, -- tabs (scripts) on the left side
 })
 
 local function notify(title, content, duration)
@@ -48,7 +48,7 @@ local function notify(title, content, duration)
     end)
 end
 
--- po uruchomieniu skryptu hub się wyładowuje, żeby nie zasłaniał jego okna
+-- after a script starts, the hub unloads so it doesn't cover the script's window
 local autoUnload = true
 
 local function unloadHub()
@@ -57,10 +57,10 @@ local function unloadHub()
     end)
 end
 
--- pobiera i uruchamia skrypt (keepOpen = nie wyładowuj huba po udanym starcie)
+-- downloads and runs a script (keepOpen = don't unload the hub after a successful start)
 local function runScript(entry, keepOpen)
-    if entry.url and entry.url:find("TWOJ_NICK", 1, true) then
-        notify(entry.name, "Ustaw prawdziwy link w tabeli SCRIPTS.", 5)
+    if entry.url and entry.url:find("YOUR_USERNAME", 1, true) then
+        notify(entry.name, "Set a real link in the SCRIPTS table.", 5)
         return false
     end
 
@@ -72,25 +72,25 @@ local function runScript(entry, keepOpen)
     end)
 
     if ok then
-        notify(entry.name, "Załadowano.")
+        notify(entry.name, "Loaded.")
         if autoUnload and not keepOpen then unloadHub() end
     else
         warn("[Script Hub] " .. entry.name .. ": " .. tostring(err))
-        notify(entry.name, "Błąd ładowania (szczegóły w konsoli F9).", 5)
+        notify(entry.name, "Failed to load (details in the F9 console).", 5)
     end
     return ok
 end
 
 ----------------------------------------------------------------
--- ZAKŁADKA HOME
+-- HOME TAB
 ----------------------------------------------------------------
 local home = window:CreateTab({ name = "Home", icon = 0 })
 
 home:CreateDivider({ text = "Hub" })
 
 home:CreateToggle({
-    name = "Wyładuj hub po uruchomieniu skryptu",
-    description = "Hub znika po starcie skryptu. Żeby wrócić, uruchom go ponownie.",
+    name = "Unload hub after launching a script",
+    description = "The hub disappears once a script starts. Run it again to bring it back.",
     value = true,
     forgetState = true,
     callback = function(v)
@@ -99,8 +99,8 @@ home:CreateToggle({
 })
 
 home:CreateButton({
-    name = "Załaduj wszystkie skrypty",
-    description = "Uruchamia po kolei każdy skrypt z listy.",
+    name = "Load all scripts",
+    description = "Runs every script from the list, one after another.",
     callback = function()
         for _, entry in ipairs(SCRIPTS) do
             runScript(entry, true)
@@ -111,15 +111,15 @@ home:CreateButton({
 })
 
 home:CreateButton({
-    name = "Wyładuj hub",
-    description = "Zamyka okno huba (załadowane skrypty działają dalej).",
+    name = "Unload hub",
+    description = "Closes the hub window (loaded scripts keep running).",
     callback = function()
         window:Unload()
     end,
 })
 
 ----------------------------------------------------------------
--- ZAKŁADKI SKRYPTÓW (lewy panel)
+-- SCRIPT TABS (left panel)
 ----------------------------------------------------------------
 for _, entry in ipairs(SCRIPTS) do
     local tab = window:CreateTab({ name = entry.name, icon = 0 })
@@ -127,7 +127,7 @@ for _, entry in ipairs(SCRIPTS) do
     tab:CreateDivider({ text = entry.name })
 
     tab:CreateButton({
-        name = "Uruchom",
+        name = "Run",
         description = entry.description,
         callback = function()
             runScript(entry)
@@ -136,15 +136,15 @@ for _, entry in ipairs(SCRIPTS) do
 
     if entry.unload then
         tab:CreateButton({
-            name = "Wyłącz",
-            description = "Wyładowuje ten skrypt.",
+            name = "Turn off",
+            description = "Unloads this script.",
             callback = function()
                 local ok, err = pcall(entry.unload)
                 if ok then
-                    notify(entry.name, "Wyładowano.")
+                    notify(entry.name, "Unloaded.")
                 else
                     warn("[Script Hub] " .. entry.name .. ": " .. tostring(err))
-                    notify(entry.name, "Nie udało się wyładować.", 5)
+                    notify(entry.name, "Failed to unload.", 5)
                 end
             end,
         })
