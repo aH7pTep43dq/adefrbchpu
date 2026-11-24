@@ -1,12 +1,29 @@
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+if getgenv then
+    local prev = getgenv().VisualsWorld_Instance
+    if prev and type(prev.Unload) == "function" then
+        pcall(prev.Unload)
+    end
+end
+
+local okLib, Rayfield = pcall(function()
+    return loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+end)
+if not okLib or not Rayfield then
+    warn("[Visuals / World] Failed to load Rayfield Gen2: " .. tostring(Rayfield))
+    return
+end
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 
-local camera = Workspace.CurrentCamera
+local function getCamera()
+    return Workspace.CurrentCamera
+end
+
 local localPlayer = Players.LocalPlayer
+local initCam = getCamera()
 
 -- remember the original settings
 local original = {
@@ -19,7 +36,7 @@ local original = {
     FogColor = Lighting.FogColor,
     ClockTime = Lighting.ClockTime,
     GlobalShadows = Lighting.GlobalShadows,
-    FieldOfView = camera.FieldOfView,
+    FieldOfView = initCam and initCam.FieldOfView or 70,
     MaxZoom = localPlayer.CameraMaxZoomDistance,
     MinZoom = localPlayer.CameraMinZoomDistance,
 }
@@ -172,13 +189,22 @@ local function unload()
         Lighting.FogColor = original.FogColor
         Lighting.ClockTime = original.ClockTime
         Lighting.GlobalShadows = original.GlobalShadows
-        camera.FieldOfView = original.FieldOfView
+        local cam = getCamera()
+        if cam then cam.FieldOfView = original.FieldOfView end
         localPlayer.CameraMaxZoomDistance = original.MaxZoom
         localPlayer.CameraMinZoomDistance = original.MinZoom
     end)
 
+    if getgenv and getgenv().VisualsWorld_Instance then
+        getgenv().VisualsWorld_Instance = nil
+    end
+
     -- close the GUI (method from the Gen2 docs)
     pcall(function() window:Unload() end)
+end
+
+if getgenv then
+    getgenv().VisualsWorld_Instance = { Unload = unload }
 end
 
 window = Rayfield:CreateWindow({
@@ -242,7 +268,10 @@ visuals:CreateDivider({ text = "Effects" })
 
 toggle(visuals, "Remove Post-Processing", "Disables blur, bloom, sun rays, color correction and depth of field.",
     makeEffect(
-        function() return { Lighting, camera } end,
+        function()
+            local cam = getCamera()
+            return cam and { Lighting, cam } or { Lighting }
+        end,
         function(i) return i:IsA("PostEffect") end,
         function(i) local o = i.Enabled; i.Enabled = false; return o end,
         function(i, o) i.Enabled = o end
@@ -263,9 +292,11 @@ visuals:CreateDivider({ text = "Camera" })
 
 toggle(visuals, "Custom FOV", "Applies the field of view from the slider.", function(on)
     bind("fov", on, function()
-        camera.FieldOfView = value.FOV
+        local cam = getCamera()
+        if cam then cam.FieldOfView = value.FOV end
     end, function()
-        camera.FieldOfView = original.FieldOfView
+        local cam = getCamera()
+        if cam then cam.FieldOfView = original.FieldOfView end
     end)
 end)
 
